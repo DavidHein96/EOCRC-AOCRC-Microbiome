@@ -1,0 +1,143 @@
+---
+title: "ASV Workflow"
+author: "david.hein@utsouthwestern.edu"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    number_sections: true
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<br>
+
+# Load Packages 
+```{r,results='hide',message=FALSE, warning=FALSE}
+library(dada2)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(stringr)
+library(DECIPHER)
+library(phangorn)
+# If these packages are not present, uncomment and run the following code 
+
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#
+#BiocManager::install("dada2")
+
+#install.packages("dplyr")
+#install.packages("plyr")
+#install.packages("ggplot2")
+```
+<br>
+
+# Initial instructions
+1. Retrieve the directory path of the file containing the FASTQ files
+2. Create a sub directory in that directory called "filtered"
+3. Create another sub directory somewhere else where you want to run all of your analysis from, set this as the working directory for R.
+    This R markdown file should be in that directory
+4. In the working directory make sure there is the silva_nr99_v138.1_train_set file and the silva_species_assignments file
+<br>
+
+# Set up inital things 
+```{r,eval=FALSE}
+# Set this as the path of where your FASTQ files are 
+path<-"nov2022FASTQ"
+
+# Set this to the group name of who the files belong to, and if you want you can throw a date in there
+group_name <- "Sanford_Nov_2022"
+
+```
+<br>
+
+# Run dada2 
+
+## Run these chunks to prepare data
+```{r,eval=FALSE}
+list.files(path)
+
+#Here make sure the FASTQs follow the typical naming convention of SampleID_randomstuff_R1_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+```
+
+Check out quality plots by changing the number, pick a good cut off to trim the end of the reads, the reverse read will probably need to be trimmed more
+```{r,eval=FALSE}
+plotQualityProfile(fnFs[130])
+plotQualityProfile(fnRs[130])
+
+```
+
+Change the trunc length and run this chunk, look at the output, some files will have so few reads that they may need to be removed 
+```{r,eval=FALSE}
+# Filtering files and placing in the directory
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+# Here you set the trim at the truncLen parameter
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(220,200),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=TRUE)
+
+# Learning the error rate for DADA2 algorithm
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+
+print(out)
+
+```
+<br>
+
+## Run core program 
+This chunk takes the longest
+```{r,eval=FALSE}
+# Running the core algo
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+
+# Merging fwd and rev reads
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+
+# Making table of reads and removing chimeras
+seqtab <- makeSequenceTable(mergers)
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+
+# Assigning taxa with a pretrained classifier, up to genus level
+taxa <- assignTaxonomy(seqtab.nochim, "silva_nr99_v138.1_train_set.fa.gz", multithread=TRUE)
+# Adds species only with an exact match to the ASV 
+taxa <- addSpecies(taxa, "silva_species_assignment_v138.1.fa.gz")
+
+ASVs <- DNAStringSet(colnames(seqtab.nochim))
+names(ASVs)<- paste0("ASV",1:ncol(seqtab.nochim))
+alignment <- AlignSeqs(ASVs,anchor=NA,processors = NULL)
+
+```
+<br>
+
+# Making the files for analysis 
+Produces a file showing counts and taxonomy for all ASVs
+```{r,eval=FALSE}
+## 1. file with all ASVs ##
+# transpose and set as df with the dna sequences as a variable
+seqtab_nochim_t <- t(seqtab.nochim)
+seqtab_nochim_t_df <- data.frame(seqtab_nochim_t)
+
+# set as df with dna sequence variable
+taxa_df <- data.frame(taxa)
+df_final <- cbind(taxa_df,seqtab_nochim_t_df)
+write.csv(df_final,file = paste0(group_name,"_full_taxonomy_with_ASV.csv"),row.names = FALSE,quote=FALSE)
+```
+<br><br>
+
+
+# Session info
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,439 @@
+---
+title: "EOCRC vs AOCRC Microbiome Project"
+author: "david.hein@utsouthwestern.edu"
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Libraries & Setup
+```{r,results='hide',message=FALSE, warning=FALSE}
+library(phyloseq)
+library(ANCOMBC)
+library(vegan)
+library(plyr)
+library(microbiomeMarker)
+library(ggpubr)
+library(tidyverse)
+library(Maaslin2)
+library(ggtext)
+
+source("helper_functions.r",local=knitr::knit_global())
+set.seed(2023)
+```
+<br>
+
+
+# Import Data
+```{r}
+selected_patients <- read.delim("selected_patients.txt")
+Sanford_Nov_2022level_7_ASVs <- read.csv("Sanford_Nov_2022level_7_ASVs.csv")
+```
+<br>
+
+
+# Race/ethnicity and onset analysis
+
+
+## Set up phyloseq object (Eth/Onset)
+```{r}
+# Filter and clean data, remove antibiotics here, make race/ethnicity and age binary
+clinical_eth_age<-selected_patients%>%filter(First_Stool_Anti_Days_Before < -120 | First_Stool_Anti_Before=='n')
+clinical_eth_age<-clinical_eth_age %>% select(SampleID,
+                                              Age_at_Diag,
+                                              Onset,
+                                              Sex,
+                                              RaceEth,
+                                              Ethnicity,
+                                              Treatment_Cat,
+                                              Composite_Binary,
+                                              Initial_MRI_Stage_Simple,
+                                              Why_Binary)
+
+clinical_eth_age<-clinical_eth_age %>% mutate(Onset = ifelse(Onset =="EOCRC","EOCRC","AOCRC"),Ethnicity = ifelse(Ethnicity=="nonhisp","Non-Hispanic","White-Hispanic"))
+
+# Create phylo obj
+eth_age_phylo <- build_phylo_obj(clinical_eth_age,Sanford_Nov_2022level_7_ASVs)
+
+# Check library size 
+check_library_size<-data.frame(eth_age_phylo$unfilt@otu_table)
+colSums(check_library_size)
+```
+<br><br>
+
+
+## Differential Abundance (Eth/Onset)
+```{r, eval=FALSE}
+# run ancombc on filt and unfilt sets for onset and ethnicity
+ancomres_eth_age_filt_ethnicity<-run_ancom_all_levels(eth_age_phylo$filt,"Ethnicity")
+ancomres_eth_age_filt_onset<-run_ancom_all_levels(eth_age_phylo$filt,"Age_at_Diag")
+
+ancomres_eth_age_unfilt_ethnicity<-run_ancom_all_levels(eth_age_phylo$unfilt,"Ethnicity")
+ancomres_eth_age_unfilt_onset<-run_ancom_all_levels(eth_age_phylo$unfilt,"Onset")
+
+# Run MaAsLin2
+masres_eth_age_filt_ethnicity <-run_mas_all_levels(eth_age_phylo$filt,"Ethnicity")
+masres_eth_age_filt_onset <-run_mas_all_levels(eth_age_phylo$filt,"Age_at_Diag")
+
+masres_eth_age_unfilt_ethnicity <-run_mas_all_levels(eth_age_phylo$unfilt,"Ethnicity")
+masres_eth_age_unfilt_onset <-run_mas_all_levels(eth_age_phylo$unfilt,"Age_at_Diag")
+
+# Combine Mas and ancom results into an easy to work with data frame
+combres_eth_age_filt_ethnicity <- combine_res(masres_eth_age_filt_ethnicity,ancomres_eth_age_filt_ethnicity)
+combres_eth_age_filt_onset <- combine_res(masres_eth_age_filt_onset,ancomres_eth_age_filt_onset)
+
+combres_eth_age_unfilt_ethnicity <- combine_res(masres_eth_age_unfilt_ethnicity,ancomres_eth_age_unfilt_ethnicity)
+combres_eth_age_unfilt_onset <- combine_res(masres_eth_age_unfilt_onset,ancomres_eth_age_unfilt_onset)
+
+saveRDS(combres_eth_age_filt_ethnicity, file="completed_tests/combres_eth_age_filt_ethnicity.rds")
+saveRDS(combres_eth_age_filt_onset, file="completed_tests/combres_eth_age_filt_onset.rds")
+saveRDS(combres_eth_age_unfilt_ethnicity, file="completed_tests/combres_eth_age_unfilt_ethnicity.rds")
+
+saveRDS(combres_eth_age_unfilt_onset, file="completed_tests/combres_eth_age_unfilt_onset.rds")
+```
+<br>
+
+### DA Results Ethincity 10%
+```{r}
+combres_eth_age_filt_ethnicity <- readRDS(file="completed_tests/combres_eth_age_filt_ethnicity.rds")
+knitr::kable(combres_eth_age_filt_ethnicity[1:20,],digits=3)
+```
+<br>
+
+### DA Results Ethincity 0%
+```{r}
+combres_eth_age_unfilt_ethnicity <- readRDS(file="completed_tests/combres_eth_age_unfilt_ethnicity.rds")
+knitr::kable(combres_eth_age_unfilt_ethnicity[1:20,],digits=3)
+```
+<br>
+
+### DA Results Onset 10%
+```{r}
+combres_eth_age_filt_onset <- readRDS(file="completed_tests/combres_eth_age_filt_onset.rds")
+knitr::kable(combres_eth_age_filt_onset[1:20,],digits=3)
+```
+<br>
+
+### DA Results Onset 0%
+```{r}
+combres_eth_age_unfilt_onset <- readRDS(file="completed_tests/combres_eth_age_unfilt_onset.rds")
+knitr::kable(combres_eth_age_unfilt_onset[1:20,],digits=3)
+```
+<br><br>
+
+
+## Alpha diversity (Eth/Onset)
+```{r, message=FALSE, warning=FALSE}
+alpha_meas = c("Chao1", "Shannon", "Simpson","ACE")
+
+p<-plot_richness(eth_age_phylo$unfilt, "Onset", measures=alpha_meas)
+p + geom_boxplot(data=p$data, aes(x=Onset, y=value),color="darkblue", alpha=0.1)+
+      ggtitle("Onset Alpha Diversity") + theme_test() + xlab("")
+
+p<-plot_richness(eth_age_phylo$unfilt, "Ethnicity", measures=alpha_meas)
+p + geom_boxplot(data=p$data, aes(x=Ethnicity, y=value),color="darkblue", alpha=0.1)+
+      ggtitle("Race/Ethnicity Alpha Diversity") + theme_test() +
+      scale_x_discrete(labels=c("Non-Hispanic" = "Non\nHispanic", "White-Hispanic" = "White\nHispanic" )) + xlab("")
+```
+<br><br>
+
+
+## Beta diversity (Eth/Onset)
+
+### Compositional
+```{r}
+# get clr transform
+eth_age_phylo_clr <- microbiome::transform(eth_age_phylo$unfilt,"clr")
+a<-eth_age_phylo$filt
+
+# run PCA on clr transformed data. PCA uses euclidean distance 
+ord_clr <- phyloseq::ordinate(eth_age_phylo_clr,"RDA")
+ord_plot_df<-phyloseq::plot_ordination(a, ord_clr, type="samples", color="Ethnicity",justDF=TRUE)  
+
+# check out variance explained by each PC
+phyloseq::plot_scree(ord_clr) + geom_bar(stat="identity", fill = "blue") +
+                                  labs(x = "\nAxis", y = "Proportion of Variance\n") + 
+                                  ggtitle("Scree Plot Race/Ethnicity and Onset Compositional")
+
+# Generate Aitchison distance matrix
+clr_dist_matrix <- phyloseq::distance(eth_age_phylo_clr, method = "euclidean")
+
+# ADONIS test
+vegan::adonis2(clr_dist_matrix ~ clinical_eth_age$Ethnicity,permutations = 100000)
+dispr<-vegan::betadisper(clr_dist_matrix , clinical_eth_age$Ethnicity)
+permutest(dispr,permutations = 100000)
+
+vegan::adonis2(clr_dist_matrix ~ clinical_eth_age$Onset,permutations = 100000)
+dispr<-vegan::betadisper(clr_dist_matrix , clinical_eth_age$Onset)
+permutest(dispr,permutations = 100000)
+
+# Plot compositional PC with stat ellipse, the stat ellipse is a 95% conf interval from a multivariate t distribution
+ggplot(ord_plot_df,aes(x=PC1,y=PC2,color=Ethnicity)) + geom_point(size=2.8) +
+                                                        stat_ellipse(linetype=2,linewidth=0.8) +
+                                                        ggtitle("Aitchison Distance Ethnicity") +
+                                                        theme_test() + 
+                                                        theme(legend.position = "bottom",text = element_text(size=16)) +
+                                                        annotate("text",x=6,y=-4.8, label="PERMANOVA Results:\nseparation p<0.001\nR^2=0.047\ndispersion p=0.179",size=3,lineheight=0.8)+
+                                                        xlab("PC1 (9.6%)")+ylab("PC2 (7.6%)")+
+                                                        scale_color_manual(values=c("#d6604d","#4393c3"))
+  
+ggplot(ord_plot_df,aes(x=PC1,y=PC2,color=Onset)) + geom_point(size=2.8)+stat_ellipse(linetype=2,linewidth=0.8) +
+                                                    ggtitle("Aitchison Distance Onset")+
+                                                    theme_test()+theme(legend.position = "bottom",text = element_text(size=16))+
+                                                    annotate("text",x=5.8,y=-5.2, label="PERMANOVA Results:\nseparation p=0.512\nR^2=0.023\ndispersion p=0.931",size=3,lineheight=0.8)+
+                                                    scale_color_manual(values=c("#bf812d","#35978f"))
+```
+<br><br>
+
+
+### Bray Curtis
+```{r}
+# tss normalization
+eth_age_phylo_tss <- microbiome::transform(eth_age_phylo$filt,"compositional")
+# bray curtis dissimilarity
+ord_tss <- phyloseq::ordinate(eth_age_phylo_tss,distance="bray",method="PCoA")
+ord_plot_df2 <- phyloseq::plot_ordination(a, ord_tss, type="samples", color="Ethnicity",justDF=TRUE)  
+
+# check out variance explained by each PC
+phyloseq::plot_scree(ord_tss) + geom_bar(stat="identity", fill = "blue") +
+                                labs(x = "\nAxis", y = "Proportion of Variance\n") + 
+                                ggtitle("Scree Plot Race/Ethnicity and Onset Bray-Curtis")
+
+# ADONIS tests 
+bray_dist_matrix <- phyloseq::distance(eth_age_phylo_tss, method = "bray")
+?phyloseq::distance
+
+vegan::adonis2(bray_dist_matrix ~ clinical_eth_age$Ethnicity,permutations = 100000)
+dispr <- vegan::betadisper(bray_dist_matrix , clinical_eth_age$Ethnicity)
+permutest(dispr,permutations = 100000)
+
+vegan::adonis2(bray_dist_matrix ~ clinical_eth_age$Onset,permutations = 100000)
+dispr <- vegan::betadisper(bray_dist_matrix , clinical_eth_age$Onset)
+permutest(dispr,permutations = 10000)
+
+
+# plotting w/ 95% conf interval 
+ggplot(ord_plot_df2,aes(x=Axis.1,y=Axis.2,color=Ethnicity)) + geom_point(size=2.8) + 
+                                                              stat_ellipse(linetype=2,linewidth=0.8)+ 
+                                                              ggtitle("Bray-Curtis Dissimilarity Ethnicity") +
+                                                              theme_test()+theme(legend.position = "bottom",text = element_text(size=16)) +
+                                                              annotate("text",x=0.48,y=-.35, label="PERMANOVA Results:\nseparation p=0.003\nR^2=0.045\ndispersion p=0.854",size=3,lineheight=0.8) +
+                                                              scale_color_manual(values=c("#d6604d","#4393c3")) + xlab("PC1 (12.7%)") + ylab("PC2 (9.8%)")
+
+ggplot(ord_plot_df2,aes(x=Axis.1,y=Axis.2,color=Onset)) + geom_point(size=2.8) + 
+                                                          stat_ellipse(linetype=2,linewidth=0.8) + 
+                                                          ggtitle("Bray-Curtis Dissimilarity Onset")+
+                                                          theme_test()+theme(legend.position = "bottom",text = element_text(size=16))+
+                                                          annotate("text",x=0.4,y=.35, label="PERMANOVA Results:\nseparation p=0.458\nR^2=0.023\ndispersion p=0.151",size=3,lineheight=0.8)+
+                                                          scale_color_manual(values=c("#bf812d","#35978f")) + xlab("PC1 (12.7%)") + ylab("PC2 (9.8%)")
+
+#ggsave(plot=last_plot(),file="alpha_diversity.tiff",height=4,width=8)
+#ggsave(plot=last_plot(),file="ethnicity_beta_atchison.tiff",height=6,width=8)
+```
+<br><br>
+
+
+# Composite binary response analysis
+
+## Set up phyloseq (response)
+```{r}
+clinical_resp <- selected_patients
+clinical_resp <- clinical_resp %>% select(SampleID,
+                                        Age_at_Diag,
+                                        Onset,
+                                        Sex,
+                                        RaceEth,
+                                        Ethnicity,
+                                        Composite_Binary,
+                                        Why_Binary,
+                                        First_Stool_Anti_Before,
+                                        Initial_MRI_Stage_Simple,
+                                        Treatment_Cat) %>% filter(!is.na(Composite_Binary))
+
+clinical_resp<-clinical_resp %>% mutate(Composite_Binary = ifelse(Composite_Binary == 1,"Complete/Near Complete","Partial/Poor"))
+
+#table(clinical_resp$Why_Binary,clinical_resp$RaceEth)
+#table(clinical_resp$Composite_Binary)
+#summary(clinical_resp$Age_at_Diag)
+
+# Create phylo obj
+resp_phylo <- build_phylo_obj(clinical_resp,Sanford_Nov_2022level_7_ASVs)
+```
+<br><br>
+
+
+## Differential abundance (response)
+```{r,eval=FALSE}
+# run ancombc on filt and unfilt 
+ancomres_resp_filt_respb <- run_ancom_all_levels(resp_phylo$filt,"Composite_Binary")
+ancomres_resp_unfilt_respb <- run_ancom_all_levels(resp_phylo$unfilt,"Composite_Binary")
+
+# Run MaAsLin2
+masres_resp_filt_respb <- run_mas_all_levels(resp_phylo$filt,"Composite_Binary")
+masres_resp_unfilt_respb <- run_mas_all_levels(resp_phylo$unfilt,"Composite_Binary")
+
+# Combine Mas and ancombc results into an easy to work with data frame
+combres_resp_filt_respb <- combine_res(masres_resp_filt_respb,ancomres_resp_filt_respb)
+combres_resp_unfilt_respb <- combine_res(masres_resp_unfilt_respb,ancomres_resp_unfilt_respb)
+
+saveRDS(combres_resp_filt_respb, file="completed_tests/combres_resp_filt_respb.rds")
+saveRDS(combres_resp_unfilt_respb, file="completed_tests/combres_resp_unfilt_respb.rds")
+```
+<br>
+
+### DA Results Response 10%
+```{r}
+combres_resp_filt_respb <- readRDS(file="completed_tests/combres_resp_filt_respb.rds")
+knitr::kable(combres_resp_filt_respb[1:20,],digits=3)
+```
+<br>
+
+### DA Results Response 0%
+```{r}
+combres_resp_unfilt_respb <- readRDS(file="completed_tests/combres_resp_unfilt_respb.rds")
+knitr::kable(combres_resp_unfilt_respb[1:20,],digits=3)
+```
+<br><br>
+
+
+## Alpha diversity (response)
+```{r,warning=FALSE}
+alpha_meas = c("Chao1", "Shannon", "Simpson","ACE")
+p <- plot_richness(resp_phylo$filt, "Composite_Binary", measures=alpha_meas) 
+p + geom_boxplot(data=p$data, aes(x=Composite_Binary, y=value),color="darkblue", alpha=0.1) + 
+      ggtitle("Binary Response Alpha Diversity") + 
+      stat_compare_means(method="wilcox.test",aes(label = ..p.signif..)) + 
+      theme_test() + scale_x_discrete(labels=c("Complete/Near Complete" = "Complete/\nNear Complete", "Partial/Poor" = "Partial/\nPoor")) + xlab("")
+    
+```
+<br><br>
+
+
+## Beta diversity (response)
+
+### Compositional (response)
+```{r}
+# clr transform
+resp_phylo_clr <- microbiome::transform(resp_phylo$filt,"clr")
+a_resp<-resp_phylo$filt
+
+# pca
+ord_clr_resp <- phyloseq::ordinate(resp_phylo_clr,"RDA")
+ord_plot_df_resp <- phyloseq::plot_ordination(a_resp, ord_clr_resp, type="samples", color="Composite_Binary",justDF=TRUE)  
+
+# check variance on pcs
+phyloseq::plot_scree(ord_clr_resp) + 
+  geom_bar(stat="identity", fill = "blue") +
+  labs(x = "\nAxis", y = "Proportion of Variance\n") + ggtitle("Scree Plot Response Compositional")
+
+#Generate distance matrix
+clr_dist_matrix_resp <- phyloseq::distance(resp_phylo_clr, method = "euclidean")
+
+# PERMANOVA test
+vegan::adonis2(clr_dist_matrix_resp ~ clinical_resp$Composite_Binary,permutations = 100000)
+dispr<-vegan::betadisper(clr_dist_matrix_resp ,  clinical_resp$Composite_Binary)
+permutest(dispr,permutations = 100000)
+
+ggplot(ord_plot_df_resp,aes(x=PC1,y=PC2,color=Composite_Binary)) + geom_point(size=2.8) + 
+                                                                    stat_ellipse(linetype=2,linewidth=0.8) +
+                                                                    ggtitle("Aitchison Distance Composite Binary") +
+                                                                    theme_test()+theme(legend.position = "bottom",text = element_text(size=16)) +
+                                                                    xlab("PC1 (9.3%)")+ylab("PC2 (6.7%)") +
+                                                                    scale_color_manual(values=c("#e08214","#8073ac")) +
+                                                                    annotate("text",x=5,y=5.8, label="PERMANOVA Results:\nseparation p=0.308\nR^2=0.019\ndispersion p=0.257",size=3,lineheight=0.8)
+```
+<br><br>
+
+
+### Bray-Curtis (response)
+```{r}
+# pcoa on bray curtis diss
+resp_phylo_tss <- microbiome::transform(resp_phylo$filt,"compositional")
+ord_tss_resp <- phyloseq::ordinate(resp_phylo_tss,distance="bray",method="PCoA")
+ord_plot_df2_resp<-phyloseq::plot_ordination(a_resp, ord_tss_resp, type="samples", color="Composite_Binary",justDF=TRUE)  
+
+phyloseq::plot_scree(ord_tss_resp) + 
+  geom_bar(stat="identity", fill = "blue") +
+  labs(x = "\nAxis", y = "Proportion of Variance\n")+ggtitle("Scree Plot Response Compositional")
+
+# PERMANOVA
+bray_dist_matrix_resp <- phyloseq::distance(resp_phylo_tss, method = "bray")
+vegan::adonis2(bray_dist_matrix_resp ~ clinical_resp$Composite_Binary,permutations = 100000)
+dispr<-vegan::betadisper(bray_dist_matrix_resp ,  clinical_resp$Composite_Binary)
+permutest(dispr,permutations = 100000)
+
+# plot w/95% 
+ggplot(ord_plot_df2_resp,aes(x=Axis.1,y=Axis.2,color=Composite_Binary))+geom_point(size=2.8)+
+                                                                        stat_ellipse(linetype=2,linewidth=0.8)+
+                                                                        ggtitle("Bray-Curtis Dissimilarity Composite Binary")+
+                                                                        theme_test()+theme(legend.position = "bottom",text = element_text(size=16))+
+                                                                        annotate("text",x=.45,y=-.3, label="PERMANOVA Results:\nseparation p=0.170\nR^2=0.022\ndispersion p=0.477",size=3,lineheight=0.8)+
+                                                                        xlab("PC1 (11.6%)")+ylab("PC2 (8.5%)")+
+                                                                        scale_color_manual(values=c("#e08214","#8073ac"))
+
+#ggsave(plot=last_plot(),file="response_beta_bray.tiff",height=6,width=8)
+```
+<br><br>
+
+
+# Figure 1 Differential expression Plot 
+```{r, warning=FALSE}
+# Now the stylized taxa names are edited manually in excel and then imported back into R
+  # Used to make the final table used for the figure in R, but it required a TON of code, much more practical to just add the needed edits in excel
+graph_df_with_stylized_taxa <- read_delim("figure1_data_with_stylized_taxa_new.txt", delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+
+# pivot so that each line in the dataframe is its own bar in the figure
+graph_df_final <- graph_df_with_stylized_taxa %>% pivot_longer(cols = 2:3, names_to = "fc_type", values_to = "Log FC" )
+graph_df_final <- graph_df_final %>% pivot_longer(cols = 2:3, names_to = "se_type", values_to = "Standard Error" )
+graph_df_final <- graph_df_final%>%select(-pval_ancom,-pval_mas)
+
+# filter out incorrect matches of LFC and SE
+graph_df_final <- graph_df_final%>%filter( !(str_detect(se_type,"mas") & str_detect(fc_type,"ANC")) )
+graph_df_final <- graph_df_final%>%filter( !(str_detect(se_type,"anc") & str_detect(fc_type,"Ma")) )
+
+# add in decrease or increase for fill color
+graph_df_final <- graph_df_final %>% mutate(fc_type = ifelse(`Log FC` < 0, paste0(fc_type,"decrease"), paste0(fc_type,'increase')))
+
+# Order by ancombc fold change
+graph_df_final$fc_type = factor(graph_df_final$fc_type,levels = c("Log FC MaAsLin2decrease","Log FC ANCOMBCdecrease","Log FC MaAsLin2increase","Log FC ANCOMBCincrease"))
+subset_re <- graph_df_final%>%filter(se_type=="sdancom")
+subset_re$styled_taxa = with(subset_re,reorder(styled_taxa,`Log FC`))
+graph_df_final$styled_taxa = factor(graph_df_final$styled_taxa,levels = levels(subset_re$styled_taxa))
+
+ggplot(graph_df_final,aes(fill=fc_type,y=`Log FC`,x=styled_taxa))+
+          geom_bar(width=0.7,position=position_dodge(0.7),stat="identity")+
+          geom_errorbar(aes(ymin=`Log FC`,ymax=ifelse(`Log FC`>0,`Log FC`+2*`Standard Error`,`Log FC`-2*`Standard Error`)),
+                        width=0.2,position = position_dodge(0.7),color="#525252",linewidth=0.2)+
+          coord_flip()+   
+          scale_fill_manual(values=c("#f4a582","#d6604d","#92c5de","#4393c3"))+
+          theme_bw()+
+          theme( # remove the vertical grid lines
+           panel.grid.major.x = element_blank() ,
+           panel.grid.minor.x = element_blank(),
+           # explicitly set the horizontal lines (or they will disappear too)
+           panel.grid.major.y = element_line( size=.04, color="black") ,legend.position = 'none',legend.title = element_blank(),
+           axis.text.y = element_markdown(),
+           axis.title.y = element_blank(),
+           text=element_text(size=14),
+           axis.text.x = element_text(size = 11))+
+          guides(fill=guide_legend(nrow=2,byrow=TRUE))+
+          ylab("Log Fold Change")+
+          scale_y_continuous(breaks=seq(-6,8,2),limits = c(-6.5,9))
+
+#ggsave(plot=last_plot(),file="figure1a.tiff",width = 10,height=8)
+```
+<br><br>
+
+
+
+# Session info
+```{r}
+sessionInfo()
+```
